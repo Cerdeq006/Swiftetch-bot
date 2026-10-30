@@ -1,0 +1,85 @@
+import os
+import asyncio
+import tempfile
+from telegram import Update
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
+)
+import yt_dlp
+
+TOKEN = os.environ["BOT_TOKEN"]
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👋 Welcome to SwiftFetch Bot!\n\n"
+        "Send me a TikTok or an authorized video link "
+        "to get started."
+    )
+
+async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = update.message.text.strip()
+
+    if not url.startswith(("https://", "http://")):
+        await update.message.reply_text("Please send a valid video link.")
+        return
+
+    status = await update.message.reply_text("⏳ Processing your video...")
+
+    try:
+        with tempfile.TemporaryDirectory() as folder:
+            output = os.path.join(folder, "video.%(ext)s")
+
+            options = {
+                "format": "best[ext=mp4]/best",
+                "outtmpl": output,
+                "max_filesize": 45 * 1024 * 1024,
+                "quiet": True,
+                "no_warnings": True,
+                "noplaylist": True,
+            }
+
+            await asyncio.to_thread(
+                lambda: yt_dlp.YoutubeDL(options).download([url])
+            )
+
+            files = [
+                os.path.join(folder, f)
+                for f in os.listdir(folder)
+            ]
+
+            if not files:
+                raise Exception("No video was downloaded.")
+
+            with open(files[0], "rb") as video:
+                await update.message.reply_video(
+                    video=video,
+                    caption="✅ Your video is ready!"
+                )
+
+        await status.delete()
+
+    except Exception:
+        await status.edit_text(
+            "❌ Download failed. Try another supported link."
+        )
+
+async def main():
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, download_video)
+    )
+
+    print("SwiftFetch Bot is running!")
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    await asyncio.Event().wait()
+
+if __name__ == "__main__":
+    asyncio.run(main())
